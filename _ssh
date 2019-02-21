@@ -1,0 +1,250 @@
+#!/bin/bash
+
+dir=~
+mkdir -p $dir
+
+SQL_KEY_DEFAULTS=('be_user' 'use_first_match')
+SQL_VALUES_DEFAULTS=()
+for i in ${SQL_KEY_DEFAULTS[@]}; do
+  SQL_VALUES_DEFAULTS+=(`sqlite3 $dir/test.sqllite "select value from defaults where _key in ('$i')"`)
+done
+
+function listDefaults() {
+  for (( i=0; i<${#SQL_KEY_DEFAULTS[@]}; i++ )); do
+    echo "${SQL_KEY_DEFAULTS[$i]}=${SQL_VALUES_DEFAULTS[$i]}"
+  done
+}
+
+function getDefault() {
+  local v=$2
+  k=$1
+  for (( i=0; i<${#SQL_KEY_DEFAULTS[@]}; i++ )); do
+    if [ "${SQL_KEY_DEFAULTS[$i]}" == "$k" ]; then
+      eval $v="'${SQL_VALUES_DEFAULTS[$i]}'"
+    fi
+  done
+}
+
+function getPassword(){
+  local pass=$1
+  pf=$dir/output.bin
+  kf=$dir/key.txt
+  of=$dir/output.bin
+  if [ ! -f $pf ]; then
+    # Read Password
+    echo -n Password:
+    read -s password
+    echo
+    # Run Command
+    # generate a 2048-bit RSA key and store it in key.txt
+    test -f $kf || openssl genrsa -out $kf 2048
+
+    # encrypt password using the RSA key in key.txt
+    echo $password | openssl rsautl -inkey $kf -encrypt >$of
+  fi
+  # decrypt the message and output to stdout
+  eval $pass="'`openssl rsautl -inkey $kf -decrypt <$of`'"
+}
+function valid_ip(){
+    local  ip=$1
+    local  stat=1
+
+    if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        OIFS=$IFS
+        IFS='.'
+        ip=($ip)
+        IFS=$OIFS
+        [[ ${ip[0]} -le 255 && ${ip[1]} -le 255 \
+            && ${ip[2]} -le 255 && ${ip[3]} -le 255 ]]
+        stat=$?
+    fi
+    return $stat
+}
+function create_tables() {
+  sqlite3 $dir/test.sqllite "
+  create table if not exists hosts(
+    ip text primary key,
+    hostname text,
+    minion_id text,
+    extra_info text
+  );
+
+  create table if not exists defaults(
+    _key text primary key ,
+    value text
+  );
+  
+  create table if not exists alt_passwords(
+    ip text primary key,
+    userid text,
+    password text
+  );
+  "
+  # while read l; do
+  #   v=""
+  #   for w in $l; do
+  #     v=$w;
+  #     break;
+  #   done
+  #   vv=(${v//,/ })
+  #   ip=""
+  #   hostn=""
+  #   l="${#vv[@]}"
+  #   if [ "$l" -eq 2 ]; then
+  #     hostn=${vv[0]}
+  #     ip=${vv[1]}
+  #   elif [ "$l" -eq 1 ]; then
+  #     if ! valid_ip $i; then
+  #       hostn=${vv[0]}
+  #       # ip=`host $hostn | awk '$0=$NF' | tail -n1` # takes too long
+  #     else
+  #       ip=${vv[0]}
+  #     fi
+  #   fi
+  #   echo "$ip=$hostn"
+  # done < ~/.ssh/known_host
+}
+create_tables
+
+POSITIONAL=()
+TIMEOUT=1
+while [[ $# -gt 0 ]]; do
+  key="$1"
+  case $key in
+    -t|--time-out)
+    TIMEOUT="$2"
+    shift # past argument
+    shift # past value
+    ;;
+    -ld|--list-defaults)
+    LIST_DEFAULTS="TRUE"
+    shift # past argument
+    ;;
+    -sd|--set-default)
+    vv=$2
+    v=(${vv//=/ })
+    sqlite3 $dir/test.sqllite "insert into defaults(_key,value) values('${v[0]}','${v[1]}') ON CONFLICT(_key) DO UPDATE SET value=excluded.value WHERE excluded._key=defaults._key;"
+    exit 0
+    shift # past argument
+    shift # past value
+    ;;
+    -y|--yes)
+    YES="y"
+    shift # past argument
+    ;;
+    -q|--query)
+    QUERY="$2"
+    shift # past argument
+    shift # past value
+    ;;
+    -aa|--add-alias)
+    vv=$2
+    v=(${vv//=/ })
+    sqlite3 $dir/test.sqllite "insert into hosts(ip,extra_info) values('${v[0]}','${v[1]}') ON CONFLICT(ip) DO UPDATE SET extra_info=excluded.extra_info||','||hosts.extra_info WHERE excluded.ip=hosts.ip;;"
+    exit 0
+    ;;
+    *)    # unknown option
+    POSITIONAL+=("$1") # save it in an array for later
+    shift # past argument
+    ;;
+  esac
+done
+set -- "${POSITIONAL[@]}" # restore positional parameters
+
+if [ ! -z "$LIST_DEFAULTS" ]; then
+  listDefaults
+  exit 0
+fi
+if [ ! -z "$QUERY" ]; then
+  sqlite3 $dir/test.sqllite "select * from hosts where ip glob '*$QUERY*' or hostname glob '*$QUERY*' or minion_id glob '*$QUERY*' or extra_info glob '*$QUERY*';"
+  exit 0
+fi
+
+# if password file doesn't exist
+# TODO or password is wrong
+# prompt for password and store it as v
+getPassword v
+
+kdir=$dir/keydir
+rfile="$kdir/salt-ssh.rsa"
+mkdir -p $kdir
+test -e $rfile || yes no | ssh-keygen -t rsa -f $rfile -N ''
+kfile="$rfile.pub"
+
+chmod 400 $kfile
+
+# Validate ip given
+# If not a valid ip then try to parse the hostname to an ip
+ip=$1
+if ! valid_ip $1; then
+  ip=`gtimeout 1 host $1 | awk '$0=$NF'`
+fi
+if [ -z "$ip" ] || [ "2(SERVFAIL)" == "$ip" ]; then
+  sqlite3 $dir/test.sqllite "select * from hosts where ip glob '*$1*' or hostname glob '*$1*' or minion_id glob '*$1*' or extra_info glob '*$1*' order by ip"|head -n1
+  yn=$YES
+  getDefault 'use_first_match' dyn
+  if [ ! -z "$dyn" ] && [ -z "$yn" ]; then
+    yn=$dyn
+  fi
+  if [ -z "$yn" ]; then
+    read -p "ssh to this machine (y/n): " yn
+  fi
+  case $yn in
+    [Yy]* )
+      ip=`sqlite3 $dir/test.sqllite "select ip from hosts where ip glob '*$1*' or hostname glob '*$1*' or minion_id glob '*$1*' or extra_info glob '*$1*' order by ip"|head -n1`
+      ;;
+      * )
+      echo "invalid hostname or ip $1"
+      exit 1
+      ;;
+  esac
+fi
+echo "trying to ssh into $ip"
+# don't bother trying to ssh in if the host times out
+if ! ping $ip -c1 -W $TIMEOUT 2>&1 > /dev/null; then
+  echo "host timed out, increase wait by passing -t <seconds> or give up"
+  exit 2
+fi
+
+# add the host and ip to the known_hosts file
+ssh-keyscan -t rsa,dsa $ip 2>&1 | sort -u - ~/.ssh/known_hosts > ~/.ssh/tmp_hosts
+mv ~/.ssh/tmp_hosts ~/.ssh/known_hosts
+
+# if second command line argument is given then log in then be that user
+user=$2
+getDefault 'be_user' uu
+if [ ! -z "$uu" ] && [ -z "$user" ]; then
+  user=$uu
+fi
+vv=""
+if [ ! -z "$user" ]; then
+  vv="
+send -- \"sudo su - $user\\r\"
+passw $user
+"
+fi
+
+# log in to server
+expect -c "
+  set timeout 300
+  proc passw {user} {
+    expect {
+      \"*?assword*\" {
+        send -- \"$v\\r\"
+        exp_continue
+      }
+      \"Passcode or option*\" {
+        send -- \"1\\r\"
+        exp_continue
+      }
+      \"*\$user@*\"
+    }
+  }
+
+  spawn ssh $ip
+  passw $USER
+  $vv
+  interact
+"
+exit 0
+
