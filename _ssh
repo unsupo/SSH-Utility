@@ -21,16 +21,20 @@ function getDefault() {
   for (( i=0; i<${#SQL_KEY_DEFAULTS[@]}; i++ )); do
     if [ "${SQL_KEY_DEFAULTS[$i]}" == "$k" ]; then
       eval $v="'${SQL_VALUES_DEFAULTS[$i]}'"
+      return 0
     fi
   done
 }
 
 function getPassword(){
   local pass=$1
-  pf=$dir/output.bin
   kf=$dir/key.txt
-  of=$dir/output.bin
-  if [ ! -f $pf ]; then
+  def=global-pass.bin
+  if ! [ -z "$2" ]; then # if a second value is passed to function then that is the keyfile name
+      def=$2
+  fi
+  of=$dir/$def
+  if [ ! -f $of ]; then
     # Read Password
     echo -n Password:
     read -s password
@@ -42,7 +46,7 @@ function getPassword(){
     # encrypt password using the RSA key in key.txt
     echo $password | openssl rsautl -inkey $kf -encrypt >$of
   fi
-  # decrypt the message and output to stdout
+  # decrypt the message and output to variable
   eval $pass="'`openssl rsautl -inkey $kf -decrypt <$of`'"
 }
 function valid_ip(){
@@ -73,11 +77,11 @@ function create_tables() {
     _key text primary key ,
     value text
   );
-  
+
   create table if not exists alt_passwords(
     ip text primary key,
-    userid text,
-    password text
+    user text,
+    passfile text
   );
   "
   # while read l; do
@@ -104,7 +108,86 @@ function create_tables() {
   #   echo "$ip=$hostn"
   # done < ~/.ssh/known_host
 }
+function getIp() {
+  ipv=$2
+  ipv1=$2
+  # Validate ip given
+  # If not a valid ip then try to parse the hostname to an ip
+  if ! valid_ip $ipv1; then
+    ipv=`gtimeout 1 host $ipv1 | awk '$0=$NF'`
+  fi
+  # if still not valid then try to get it from sqllite database
+  if [ -z "$ipv" ] || [ "2(SERVFAIL)" == "$ipv" ]; then
+    echo 'Match'
+    sqlite3 $dir/test.sqllite "select * from hosts where ip glob '*$ipv1*' or hostname glob '*$ipv1*' or minion_id glob '*$ipv1*' or extra_info glob '*$ipv1*' order by ip"|head -n1
+    yn=$YES
+    getDefault 'use_first_match' dyn
+    if [ ! -z "$dyn" ] && [ -z "$yn" ]; then
+      yn=$dyn
+    fi
+    if [ -z "$yn" ]; then
+      read -p "ssh to this machine (y/n): " yn
+    fi
+    case $yn in
+      [Yy]* )
+        ipv=`sqlite3 $dir/test.sqllite "select ip from hosts where ip glob '*$ipv1*' or hostname glob '*$ipv1*' or minion_id glob '*$ipv1*' or extra_info glob '*$ipv1*' order by ip"|head -n1`
+        ;;
+        * )
+        echo "invalid hostname or ip $ipv1"
+        exit 1
+        ;;
+    esac
+  fi
+  eval "$1='$ipv'"
+}
+function changePassword() {
+  # if a host/ip wasn't passed then change global password, other wise change that host's password
+  if ! [ -z "$1" ]; then # if variable is not empty then host/ip was passed
+    host=$1
+    getIp ip $host
+  else
+    echo "changing global password for $USER"
+    rm -f $dir/global-pass.bin
+    getPassword pass
+    exit 0
+  fi
+  if ! [ -z "$2" ]; then # if not empty then user was also passed
+    user=$2
+  else
+    user=$USER
+  fi
+  echo "Changing password for User=$user Ip=$ip"
+  passfile=`sqlite3 $dir/test.sqllite "select passfile from alt_passwords where ip = '$ip' and user= '$user'"`
+  echo $passfile
+  if ! [ -z "$passfile" ]; then # if passfile is not empty then remove old pass
+    rm -f $dir/$passfile
+    getPassword pass $passfile
+    exit 0
+  fi
+  passfile="$ip-$user.bin"
+  getPassword pass $passfile
+  `sqlite3 $dir/test.sqllite "insert into alt_passwords(ip,user,passfile) values('$ip','$user','$passfile')"`
+}
+
+function printHelp() {
+  echo '-t|--time-out'
+  echo '  set the ping timeout'
+  echo '-ld|--list-defaults'
+  echo '  print out all the default values stored in sqllite'
+  echo '-sd|--set-default'
+  echo '  set or override a default value key=value'
+  echo '-y|--yes'
+  echo '  answer yes to all prompts'
+  echo '-cp|--change-password'
+  echo '  change a password with no arguments changes global password used else add host and optionally user'
+  echo '-q|--query'
+  echo '  dont ssh just show results that come up'
+  echo '-aa|--add-alias'
+  echo '  add an alias to show up in query ip=alias'
+}
+
 create_tables
+
 
 POSITIONAL=()
 TIMEOUT=1
@@ -115,6 +198,10 @@ while [[ $# -gt 0 ]]; do
     TIMEOUT="$2"
     shift # past argument
     shift # past value
+    ;;
+    -h|--help)
+    printHelp
+    exit 0
     ;;
     -ld|--list-defaults)
     LIST_DEFAULTS="TRUE"
@@ -130,6 +217,11 @@ while [[ $# -gt 0 ]]; do
     ;;
     -y|--yes)
     YES="y"
+    shift # past argument
+    ;;
+    -cp|--change-password)
+    changePassword $2 $3
+    exit 0
     shift # past argument
     ;;
     -q|--query)
@@ -173,32 +265,8 @@ kfile="$rfile.pub"
 
 chmod 400 $kfile
 
-# Validate ip given
-# If not a valid ip then try to parse the hostname to an ip
-ip=$1
-if ! valid_ip $1; then
-  ip=`gtimeout 1 host $1 | awk '$0=$NF'`
-fi
-if [ -z "$ip" ] || [ "2(SERVFAIL)" == "$ip" ]; then
-  sqlite3 $dir/test.sqllite "select * from hosts where ip glob '*$1*' or hostname glob '*$1*' or minion_id glob '*$1*' or extra_info glob '*$1*' order by ip"|head -n1
-  yn=$YES
-  getDefault 'use_first_match' dyn
-  if [ ! -z "$dyn" ] && [ -z "$yn" ]; then
-    yn=$dyn
-  fi
-  if [ -z "$yn" ]; then
-    read -p "ssh to this machine (y/n): " yn
-  fi
-  case $yn in
-    [Yy]* )
-      ip=`sqlite3 $dir/test.sqllite "select ip from hosts where ip glob '*$1*' or hostname glob '*$1*' or minion_id glob '*$1*' or extra_info glob '*$1*' order by ip"|head -n1`
-      ;;
-      * )
-      echo "invalid hostname or ip $1"
-      exit 1
-      ;;
-  esac
-fi
+getIp ip $1
+
 echo "trying to ssh into $ip"
 # don't bother trying to ssh in if the host times out
 if ! ping $ip -c1 -W $TIMEOUT 2>&1 > /dev/null; then
@@ -223,14 +291,28 @@ send -- \"sudo su - $user\\r\"
 passw $user
 "
 fi
+passes="$v"
 
-# log in to server
+passfile=`sqlite3 $dir/test.sqllite "select passfile from alt_passwords where ip = '$ip' and user= '$USER'"`
+
+if ! [ -z "$passfile" ]; then # if passfile isn't empty
+  getPassword v1 $passfile
+  passes="$v $v1"
+fi
+
 expect -c "
   set timeout 300
   proc passw {user} {
+    set passwords { $passes }
+    set try 0
     expect {
       \"*?assword*\" {
-        send -- \"$v\\r\"
+        if { \$try >= [llength \$passwords] } {
+          send_error \">>> wrong passwords\\n\"
+          exit 1
+        }
+        send -- \"[lindex \$passwords \$try]\\r\"
+        incr try
         exp_continue
       }
       \"Passcode or option*\" {
@@ -246,5 +328,5 @@ expect -c "
   $vv
   interact
 "
-exit 0
 
+exit 0
