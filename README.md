@@ -15,7 +15,7 @@ needed.
 Git clone this repo then symlink it to usr sbin so you don't need an
 absolute path everytime.
 
-`ln -s /usr/sbin/_ssh _ssh`
+`ln -s $(pwd)/_ssh /usr/local/bin/_ssh`
 
 `_ssh --help`
 - -t|--time-out
