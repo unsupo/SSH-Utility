@@ -1,12 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 dir=~
 mkdir -p $dir
 
 SQL_KEY_DEFAULTS=('be_user' 'use_first_match')
 SQL_VALUES_DEFAULTS=()
-for i in ${SQL_KEY_DEFAULTS[@]}; do
-  SQL_VALUES_DEFAULTS+=(`sqlite3 $dir/test.sqllite "select value from defaults where _key in ('$i')"`)
+for i in "${SQL_KEY_DEFAULTS[@]}"; do
+  SQL_VALUES_DEFAULTS+=($(sqlite3 $dir/test.sqllite "select value from defaults where _key in ('$i')"))
 done
 
 function listDefaults() {
