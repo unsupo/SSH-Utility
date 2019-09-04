@@ -48,5 +48,9 @@ absolute path everytime.
    `Password:`
 
    `[notaws] [<user>@<host> ~]$ sudo su - root`
+<<<<<<< HEAD
 
+=======
+   
+>>>>>>> b5d3821cbddf0d46713ea3177e02219ed329ffa6
    `[notaws] [<user>@<host> ~]# `
