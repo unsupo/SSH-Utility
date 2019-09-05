@@ -113,11 +113,11 @@ function getIp() {
   ipv1=$2
   # Validate ip given
   # If not a valid ip then try to parse the hostname to an ip
-  if ! valid_ip $ipv1; then
-    ipv=`gtimeout 1 host $ipv1 | awk '$0=$NF'`
+  if ! valid_ip "$ipv1"; then
+    ipv=$(gtimeout 1 host $ipv1 | awk '$0=$NF')
   fi
   # if still not valid then try to get it from sqllite database
-  if [ -z "$ipv" ] || [ "2(SERVFAIL)" == "$ipv" ]; then
+  if [ -z "$ipv" ] || [ "2(SERVFAIL)" == "$ipv" ] || [ "3(NXDOMAIN)" == "$ipv" ]; then
     echo 'Match'
     sqlite3 $dir/test.sqllite "select * from hosts where ip glob '*$ipv1*' or hostname glob '*$ipv1*' or minion_id glob '*$ipv1*' or extra_info glob '*$ipv1*' order by ip"|head -n1
     yn=$YES
@@ -295,7 +295,7 @@ passes="$v"
 
 passfile=`sqlite3 $dir/test.sqllite "select passfile from alt_passwords where ip = '$ip' and user= '$USER'"`
 
-if ! [ -z "$passfile" ]; then # if passfile isn't empty
+if [ -n "$passfile" ]; then # if passfile isn't empty
   getPassword v1 $passfile
   passes="$v $v1"
 fi
