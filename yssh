@@ -297,7 +297,7 @@ passfile=`sqlite3 $dir/test.sqllite "select passfile from alt_passwords where ip
 
 if [ -n "$passfile" ]; then # if passfile isn't empty
   getPassword v1 $passfile
-  passes="$v $v1"
+  passes="$v1 $v"
 fi
 
 expect -c "
