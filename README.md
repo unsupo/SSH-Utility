@@ -17,7 +17,7 @@ absolute path everytime.
 
 `ln -s $(pwd)/yssh /usr/local/bin/yssh`
 
-`_ssh --help`
+`yssh --help`
 - -t|--time-out
   - set the ping timeout
 - -ld|--list-defaults
@@ -35,22 +35,16 @@ absolute path everytime.
 
 `_ssh --change-password`
 
-`_ssh --add-alias 172.21.19.5=test`
+`_ssh --add-alias <ip>=test`
 
 `_ssh -q test`
-- `172.21.19.5|test`
+- `<ip>|test`
 
-`_ssh test`
-- `trying to ssh into 172.21.19.5`
+`yssh test`
+- `trying to ssh into x.x.x.x`
 
-   `spawn ssh 172.21.19.5`
+   `spawn ssh x.x.x.x`
 
    `Password:`
 
    `[notaws] [<user>@<host> ~]$ sudo su - root`
-<<<<<<< HEAD
-
-=======
-   
->>>>>>> b5d3821cbddf0d46713ea3177e02219ed329ffa6
-   `[notaws] [<user>@<host> ~]# `
