@@ -313,7 +313,7 @@ kfile="$rfile.pub"
 chmod 400 ${kfile}
 
 getIp ip "$1"
-[[ -z "$SSH" ]] || val='ssh into' && val="scp $SCP"
+[[ -z "$SCP" ]] && val='ssh into' || val="scp $SCP"
 echo "trying to $val $ip"
 # don't bother trying to ssh in if the host times out
 if ! ping "$ip" -c1 -W "$TIMEOUT" > /dev/null 2>&1 ; then
@@ -335,7 +335,7 @@ vv=""
 if [[ -n "$user" ]]; then
   vv="
 send -- \"sudo su - $user\\r\"
-passw $user
+passw $user \$env(pass)
 "
 fi
 passes="$v"
@@ -354,15 +354,15 @@ elif [[ "$SCP" == "from" ]]; then
   CMD="scp $LOGIN_USER@$ip:$FROM_DIR $TO_DIR"
 fi
 
+export pass="${passes}"
 expect -c "
   set timeout 300
-  proc passw {user} {
-    set passwords { $passes }
+  proc passw {user passwords} {
     set try 0
     expect {
       -re \"^.*assword.*:.*$\" {
         if { \$try >= [llength \$passwords] } {
-          send_error \">>> wrong passwords for user \$user\\n\"
+          send_error \">>> wrong passwords for user \$user\\r\"
           interact
         }
         send -- \"[lindex \$passwords \$try]\\r\"
@@ -378,7 +378,7 @@ expect -c "
   }
 
   spawn $CMD
-  passw $LOGIN_USER
+  passw $LOGIN_USER \$env(pass)
   $vv
   interact
 " 2>/dev/null
