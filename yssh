@@ -376,11 +376,10 @@ expect -c "
       \"*\$user@*\"
     }
   }
-
   spawn $CMD
   passw $LOGIN_USER \$env(pass)
   $vv
   interact
-" 2>/dev/null
+" #2>/dev/null
 
 exit 0
