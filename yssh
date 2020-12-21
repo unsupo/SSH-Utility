@@ -11,7 +11,7 @@ to log into a host with that ip and username it will use the specific password.\
 
 function printHelp() {
   echo "############   ${SCRIPT_NAME}   ############"
-  printf "${SCRIPT_DESCRIPTION}"
+  printf "%s" "${SCRIPT_DESCRIPTION}"
   echo '-t|--time-out'
   echo '  set the ping timeout'
   echo '-ld|--list-defaults'
@@ -38,9 +38,22 @@ function printHelp() {
   echo '  requires source and destination'
   echo '  example:'
   echo '  yssh <some-host-ip|pattern> -scp <to|from> path/to/source/file path/to/destination/file'
+  echo '-c|--command'
+  echo '  run a command on a machine'
+  echo '  yssh <some-host-ip|pattern> -c "echo hi"'
 }
 
 [[ -z "$1" ]] && { printHelp ; exit 1; }
+
+function install_expect() {
+    sudo apt-get update -y && sudo apt-get install -y expect
+}
+
+command -v expect > /dev/null || {
+  echo "expect not found"
+  read -p -r "Install expect? (Y/N): " confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]] || exit 1
+  install_expect;
+}
 
 dir=~/yssh
 mkdir -p ${dir}
@@ -127,30 +140,10 @@ function create_tables() {
     passfile text
   );
   "
-  # while read l; do
-  #   v=""
-  #   for w in $l; do
-  #     v=$w;
-  #     break;
-  #   done
-  #   vv=(${v//,/ })
-  #   ip=""
-  #   hostn=""
-  #   l="${#vv[@]}"
-  #   if [ "$l" -eq 2 ]; then
-  #     hostn=${vv[0]}
-  #     ip=${vv[1]}
-  #   elif [ "$l" -eq 1 ]; then
-  #     if ! valid_ip $i; then
-  #       hostn=${vv[0]}
-  #       # ip=`host $hostn | awk '$0=$NF' | tail -n1` # takes too long
-  #     else
-  #       ip=${vv[0]}
-  #     fi
-  #   fi
-  #   echo "$ip=$hostn"
-  # done < ~/.ssh/known_host
 }
+
+create_tables
+
 function getIp() {
   ipv=$2
   ipv1=$2
@@ -215,7 +208,6 @@ function changePassword() {
   `sqlite3 ${dir}/test.sqllite "insert into alt_passwords(ip,user,passfile) values('$ip','$user','$passfile')"`
 }
 
-create_tables
 
 
 POSITIONAL=()
@@ -238,8 +230,14 @@ while [[ $# -gt 0 ]]; do
     shift # past value
     shift # past second value
     ;;
+    -c|--command)
+    [[ -z "$2" ]] && { echo "Need a command to execute"; exit 1; }
+    COMMAND="$2"
+    shift
+    shift
+    ;;
     -t|--time-out)
-    TIMEOUT="$2"
+    TIMEOUT="${2:-10}"
     shift # past argument
     shift # past value
     ;;
@@ -325,17 +323,24 @@ fi
 ssh-keyscan -t rsa,dsa "$ip" 2>&1 | sort -u - ~/.ssh/known_hosts > ~/.ssh/tmp_hosts
 mv ~/.ssh/tmp_hosts ~/.ssh/known_hosts
 
-# if second command line argument is given then log in then be that user
+# if second command line argument is given (not a switch above) then log in and then be that user
 user=$2
+# if a value exists in the database for this host as a be_user then try to be that user
 getDefault 'be_user' uu
 if [[ -n "$uu" ]] && [[ -z "$user" ]]; then
   user=$uu
 fi
 vv=""
+# if user is not empty (was set above) then sudo into that user
 if [[ -n "$user" ]]; then
   vv="
 send -- \"sudo su - $user\\r\"
 passw $user \$env(pass)
+"
+[[ -z "$COMMAND" ]] || vv="$vv
+send -- \"$COMMAND\\r\"
+send -- \"exit\"
+send -- \"exit\"
 "
 fi
 passes="$v"
@@ -353,6 +358,8 @@ if [[ "$SCP" == "to" ]]; then
 elif [[ "$SCP" == "from" ]]; then
   CMD="scp $LOGIN_USER@$ip:$FROM_DIR $TO_DIR"
 fi
+# if command is not empty and user is empty then don't need to sudo to execute command
+[[ -n "$COMMAND" && -z "$user" ]] && CMD="$CMD $COMMAND"
 
 export pass="${passes}"
 expect -c "
