@@ -1,35 +1,51 @@
-# VPN-Utility
-I was tired of swapping vpns and entering my password many times a day to do this
-so i created this script to do it for me.
+# SSH-Utility
+I was extremely tired of entering my password over and over again
+as I log into different hosts.  Some hosts I'd have to wait a while
+for the password prompt to show up and it would time out because I
+was too slow to enter my password.  Also, with the introduction of
+duo, it just added further steps for me to perform for each and every
+host I'd like to log into.
 
-## Notes:
-must first stop cisco anyconnect for this to work
+I decided I'd wasted enough time on logging in, so i decided to write
+this utility.  This utility will not only log you into a shell host,
+it will allow referencing aliases using globs, it will automatically
+send a duo prompt if needed and it will log you in as another user if
+needed.
 
-## Help `vpn -h`
-CISCO Any Connect Script
-- -d|--disconnect)
-  - Use this method to disconnect from whatever vpn you are on
-- -c|--connect)
-  - Use this method along with a parameter to connect to a vpn
-  This will disconnect if not connected to specified vpn
-  A group is added as a third parameter
-  - example:
-  - `cisco -c vpn-name`
-- -g|--get-connected)
-  - Use this method to get the currently connected vpn
+Git clone this repo then symlink it to usr sbin so you don't need an
+absolute path everytime.
 
-`cd VPN-Utility`
+`ln -s $(pwd)/yssh /usr/local/bin/yssh`
 
-for just the utility
+```bash
+yssh --help
+- -t|--time-out
+  - set the ping timeout
+- -ld|--list-defaults
+  - print out all the default values stored in sqllite
+- -sd|--set-default
+  - set or override a default value key=value
+- -y|--yes
+  - answer yes to all prompts
+- -cp|--change-password
+  - change a password with no arguments changes global password used else add host and optionally user
+- -q|--query
+  - dont ssh just show results that come up
+- -aa|--add-alias
+  - add an alias to show up in query ip=alias
+```
+```bash
+yssh --change-password
 
-`ln -s $(pwd)/vpn /usr/local/bin/vpn`
+yssh --add-alias <ip>=test
 
-for the utility and the bitbar plugin
-
-`sh bitbar-installation.sh`
-
-## TODO
-- use https://github.com/matryer/bitbar to add what vpn you're connected to the the
-mac toolbar
-- tie this together with my SSH-Utility to swap to a vpn when you need to connect
-to a host on a different vpn
+yssh -q test
+<ip>|test
+```
+```bash
+yssh test
+trying to ssh into x.x.x.x`
+spawn ssh x.x.x.x`
+Password:`
+[notaws] [<user>@<host> ~]$ sudo su - root
+```
